@@ -58,13 +58,23 @@ class CoconetSampleGraph(object):
   def inputs(self):
     return self.placeholders
 
-  def build_sample_graph(self):
+  def build_sample_graph(self, input_pianorolls=None, outer_masks=None):
     """Builds the tf.while_loop based sampling graph.
 
+    Args:
+      input_pianorolls: Optional input pianorolls override. If None, uses the
+          pianorolls placeholder.
+      outer_masks: Optional input outer_masks override. If None, uses the
+          outer_masks placeholder.
     Returns:
       The output op of the graph.
     """
-    tt = tf.shape(self.inputs["pianorolls"])[1]
+    if input_pianorolls is None:
+      input_pianorolls = self.inputs["pianorolls"]
+    if outer_masks is None:
+      outer_masks = self.inputs["outer_masks"]
+
+    tt = tf.shape(input_pianorolls)[1]
     sample_steps = tf.to_float(self.inputs["sample_steps"])
     total_gibbs_steps = self.inputs["total_gibbs_steps"]
     temperature = self.inputs["temperature"]
@@ -86,8 +96,7 @@ class CoconetSampleGraph(object):
       mask_prob = compute_mask_prob_from_yao_schedule(step_count,
                                                       total_gibbs_steps)
       # 1 indicates mask out, 0 is not mask.
-      masks = make_bernoulli_masks(tf.shape(pianorolls), mask_prob,
-                                   self.inputs["outer_masks"])
+      masks = make_bernoulli_masks(tf.shape(pianorolls), mask_prob, outer_masks)
 
       logits = self.predict(pianorolls, masks)
       samples = sample_with_temperature(logits, temperature=temperature)
@@ -108,8 +117,7 @@ class CoconetSampleGraph(object):
     current_step = tf.to_float(self.inputs["current_step"])
 
     # Initializes pianorolls by evaluating the model once to fill in all gaps.
-    logits = self.predict(
-        tf.to_float(self.inputs["pianorolls"]), self.inputs["outer_masks"])
+    logits = self.predict(tf.to_float(input_pianorolls), outer_masks)
     samples = sample_with_temperature(logits, temperature=temperature)
     tf.get_variable_scope().reuse_variables()
 
@@ -123,7 +131,7 @@ class CoconetSampleGraph(object):
         back_prop=False,
         parallel_iterations=1,
         name="coco_while")
-    self.samples.set_shape(self.inputs["pianorolls"].shape)
+    self.samples.set_shape(input_pianorolls.shape)
     return self.samples
 
   def predict(self, pianorolls, masks):
